@@ -1,0 +1,26 @@
+# 권한 정책 설정
+# R=Read, W=Write, X=Execute, N=Network, S=Sensitive
+
+approval_required:
+  - W   # 파일 쓰기
+  - X   # 커맨드 실행
+  - N   # 외부 네트워크
+
+# 서버별 허용 권한 (최소 권한 원칙)
+server_permissions:
+  mcp-fs:
+    allowed: [R, W]
+    auto_approve_paths: []          # 승인 없이 쓸 수 있는 경로 (비워두면 전부 승인 필요)
+  mcp-git:
+    allowed: [R]                    # MVP에서는 읽기만, 커밋/PR은 추후
+  mcp-notes:
+    allowed: [R, W]
+  mcp-runner:
+    allowed: [X]
+    network: deny                   # 실행 시 네트워크 차단
+    timeout_seconds: 30
+
+# 레이트 리밋
+rate_limits:
+  tool_calls_per_minute: 60
+  llm_tokens_per_day: 500000

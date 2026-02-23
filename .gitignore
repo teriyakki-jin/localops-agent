@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+storage/traces.db
+storage/vector_index/
+.venv/
+*.egg-info/
+dist/

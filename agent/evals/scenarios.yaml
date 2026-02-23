@@ -1,0 +1,22 @@
+# 회귀 테스트 시나리오
+# 각 시나리오: input → expected_tools_called (최소 포함)
+
+scenarios:
+  - id: weekly_report_basic
+    name: "주간보고 생성"
+    input: "지난주 내가 한 일 요약해서 주간보고 만들어줘."
+    expected_tools: [git_log, git_diff]
+    expected_output_contains: ["주간보고", "커밋"]
+    approval_required_tools: [write_file]
+
+  - id: repo_structure
+    name: "레포 구조 파악"
+    input: "이 레포 폴더 구조 설명해줘."
+    expected_tools: [list_dir]
+    approval_required_tools: []
+
+  - id: note_search
+    name: "노트 검색"
+    input: "회의 관련 노트 찾아줘."
+    expected_tools: [search_notes]
+    approval_required_tools: []

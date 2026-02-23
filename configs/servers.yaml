@@ -1,0 +1,38 @@
+# MCP 서버 목록 (allowlist - 등록된 서버만 연결)
+# transport: stdio | sse
+
+servers:
+  - id: mcp-fs
+    name: "File System"
+    transport: stdio
+    command: ["python", "-m", "mcp_servers.fs_server"]
+    args: []
+    env:
+      ROOT_PATH: "."
+      FASTMCP_SHOW_SERVER_BANNER: "false"
+
+  - id: mcp-git
+    name: "Git"
+    transport: stdio
+    command: ["python", "-m", "mcp_servers.git_server"]
+    args: []
+    env:
+      REPO_PATH: "."
+      FASTMCP_SHOW_SERVER_BANNER: "false"
+
+  - id: mcp-notes
+    name: "Notes (Markdown)"
+    transport: stdio
+    command: ["python", "-m", "mcp_servers.notes_server"]
+    args: []
+    env:
+      NOTES_PATH: "~/notes"
+      FASTMCP_SHOW_SERVER_BANNER: "false"
+
+  - id: mcp-runner
+    name: "Command Runner (Sandbox)"
+    transport: stdio
+    command: ["python", "-m", "mcp_servers.runner_server"]
+    args: []
+    env:
+      FASTMCP_SHOW_SERVER_BANNER: "false"
