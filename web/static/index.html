@@ -28,8 +28,27 @@
         
         <main class="main-content hidden" id="trace-view">
             <div class="trace-container">
-                <h2>트레이스 뷰어</h2>
-                <p>최근 툴 호출 내역을 표시합니다. (구현 예정)</p>
+                <div class="trace-header">
+                    <h2>트레이스 뷰어</h2>
+                    <select id="session-select">
+                        <option value="">세션 선택...</option>
+                    </select>
+                    <button id="refresh-btn">새로고침</button>
+                </div>
+                <div id="trace-summary" class="trace-summary hidden"></div>
+                <table class="trace-table hidden" id="trace-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>툴</th>
+                            <th>권한</th>
+                            <th>상태</th>
+                            <th>소요시간</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trace-tbody"></tbody>
+                </table>
+                <div id="trace-empty" class="trace-empty">세션을 선택하세요.</div>
             </div>
         </main>
         
@@ -117,14 +136,107 @@
         
         // Navigation logic
         document.getElementById("nav-chat").onclick = () => switchView("chat");
-        document.getElementById("nav-trace").onclick = () => switchView("trace");
+        document.getElementById("nav-trace").onclick = () => { switchView("trace"); loadSessions(); };
         document.getElementById("nav-settings").onclick = () => switchView("settings");
-        
+
         function switchView(viewName) {
             ["chat", "trace", "settings"].forEach(v => {
                 document.getElementById(`nav-${v}`).classList.toggle("active", v === viewName);
                 document.getElementById(`${v}-view`).classList.toggle("hidden", v !== viewName);
             });
+        }
+
+        // Trace viewer
+        const TOOL_PERMISSIONS = {
+            "read_file": "R", "list_dir": "R", "git_log": "R", "git_diff": "R",
+            "git_status": "R", "read_note": "R", "search_notes": "R", "list_notes": "R",
+            "write_file": "W", "apply_patch": "W", "move_file": "W", "create_branch": "W",
+            "git_commit": "W", "create_note": "W", "append_note": "W",
+            "open_pr": "W+N", "run_command": "X", "run_python": "X",
+        };
+
+        async function loadSessions() {
+            const res = await fetch("/api/traces/sessions");
+            const sessions = await res.json();
+            const sel = document.getElementById("session-select");
+            const current = sel.value;
+            sel.innerHTML = '<option value="">세션 선택...</option>';
+            sessions.forEach(s => {
+                const d = new Date(s.started_at * 1000);
+                const label = `${s.session_id} — ${d.toLocaleString("ko-KR")} (${s.tool_count}건)`;
+                const opt = document.createElement("option");
+                opt.value = s.session_id;
+                opt.textContent = label;
+                sel.appendChild(opt);
+            });
+            if (current) sel.value = current;
+        }
+
+        document.getElementById("refresh-btn").onclick = () => {
+            loadSessions();
+            const sid = document.getElementById("session-select").value;
+            if (sid) loadTraces(sid);
+        };
+
+        document.getElementById("session-select").onchange = (e) => {
+            if (e.target.value) loadTraces(e.target.value);
+        };
+
+        async function loadTraces(sessionId) {
+            const res = await fetch(`/api/traces/${sessionId}`);
+            const rows = await res.json();
+
+            const table = document.getElementById("trace-table");
+            const empty = document.getElementById("trace-empty");
+            const tbody = document.getElementById("trace-tbody");
+            const summary = document.getElementById("trace-summary");
+
+            if (!rows.length) {
+                table.classList.add("hidden");
+                summary.classList.add("hidden");
+                empty.textContent = "기록 없음";
+                return;
+            }
+
+            const approved = rows.filter(r => r.approved).length;
+            const denied = rows.filter(r => !r.approved).length;
+            const totalMs = rows.reduce((s, r) => s + (r.duration_ms || 0), 0);
+            summary.innerHTML = `총 <b>${rows.length}</b>건 &nbsp;|&nbsp; ✓ ${approved} 승인 &nbsp; ✗ ${denied} 거부 &nbsp;|&nbsp; 총 ${totalMs.toFixed(0)}ms`;
+            summary.classList.remove("hidden");
+
+            tbody.innerHTML = "";
+            rows.forEach((r, i) => {
+                const perm = TOOL_PERMISSIONS[r.tool_name] || "?";
+                const status = r.error
+                    ? `<span class="badge badge-error">에러</span>`
+                    : r.approved
+                        ? `<span class="badge badge-ok">승인</span>`
+                        : `<span class="badge badge-deny">거부</span>`;
+                const permBadge = `<span class="badge badge-perm-${perm.replace("+","")}">${perm}</span>`;
+                const ms = r.duration_ms ? `${r.duration_ms.toFixed(0)}ms` : "-";
+
+                const tr = document.createElement("tr");
+                tr.className = "trace-row";
+                tr.innerHTML = `<td>${i + 1}</td><td class="tool-name">${r.tool_name}</td><td>${permBadge}</td><td>${status}</td><td>${ms}</td>`;
+
+                const detail = document.createElement("tr");
+                detail.className = "trace-detail hidden";
+                const args = JSON.parse(r.arguments || "{}");
+                detail.innerHTML = `<td colspan="5">
+                    <div class="detail-box">
+                        <div class="detail-section"><b>인자</b><pre>${JSON.stringify(args, null, 2)}</pre></div>
+                        <div class="detail-section"><b>결과</b><pre>${(r.result || "(없음)").slice(0, 500)}</pre></div>
+                        ${r.error ? `<div class="detail-section"><b>에러</b><pre class="error-text">${r.error}</pre></div>` : ""}
+                    </div>
+                </td>`;
+
+                tr.onclick = () => detail.classList.toggle("hidden");
+                tbody.appendChild(tr);
+                tbody.appendChild(detail);
+            });
+
+            table.classList.remove("hidden");
+            empty.textContent = "";
         }
     </script>
 </body>

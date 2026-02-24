@@ -4,7 +4,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+import aiosqlite
 
 from .approval import approval_manager
 import os
@@ -59,9 +60,43 @@ async def stream_approvals():
 async def startup_event():
     asyncio.create_task(stream_approvals())
 
+DB_PATH = Path(__file__).parent.parent / "storage" / "traces.db"
+
 @app.get("/")
 async def get_index():
     return FileResponse(static_dir / "index.html")
+
+@app.get("/api/traces/sessions")
+async def get_sessions():
+    """세션 목록 반환 (최근 20개)."""
+    if not DB_PATH.exists():
+        return JSONResponse([])
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT session_id, COUNT(*) as tool_count,
+                   MIN(timestamp) as started_at, MAX(timestamp) as ended_at
+            FROM tool_calls
+            GROUP BY session_id
+            ORDER BY started_at DESC
+            LIMIT 20
+        """)
+        rows = await cursor.fetchall()
+        return JSONResponse([dict(r) for r in rows])
+
+@app.get("/api/traces/{session_id}")
+async def get_session_traces(session_id: str):
+    """특정 세션의 툴 호출 목록 반환."""
+    if not DB_PATH.exists():
+        return JSONResponse([])
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT id, tool_name, arguments, result, approved, duration_ms, timestamp, error
+            FROM tool_calls WHERE session_id = ? ORDER BY timestamp
+        """, (session_id,))
+        rows = await cursor.fetchall()
+        return JSONResponse([dict(r) for r in rows])
 
 async def run_agent_task(user_msg: str):
     os.environ["LOCALOPS_WEB_MODE"] = "1"
