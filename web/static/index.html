@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>LocalOps Agent</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">localops-agent</div>
+            <nav class="nav-links">
+                <button id="nav-chat" class="active">채팅</button>
+                <button id="nav-trace">트레이스</button>
+                <button id="nav-settings">설정</button>
+            </nav>
+        </header>
+        
+        <main class="main-content" id="chat-view">
+            <div id="chat-messages" class="chat-messages">
+                <div class="message message-agent">[System] 에이전트와 연결 대기 중...</div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="에이전트에게 명령을 내려보세요..." autocomplete="off">
+                <button id="send-btn">전송</button>
+            </div>
+        </main>
+        
+        <main class="main-content hidden" id="trace-view">
+            <div class="trace-container">
+                <h2>트레이스 뷰어</h2>
+                <p>최근 툴 호출 내역을 표시합니다. (구현 예정)</p>
+            </div>
+        </main>
+        
+        <main class="main-content hidden" id="settings-view">
+            <div class="settings-container">
+                <h2>설정</h2>
+                <p>에이전트 설정 및 MCP 서버 관리 (구현 예정)</p>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        const messagesDiv = document.getElementById("chat-messages");
+        const inputEl = document.getElementById("chat-input");
+        const sendBtn = document.getElementById("send-btn");
+        
+        ws.onopen = () => {
+            appendMessage("system", "웹소켓 연결 성공!");
+        };
+
+        function appendMessage(sender, textOrObj, type="text") {
+            const msgEl = document.createElement("div");
+            msgEl.className = `message message-${sender}`;
+            
+            if (type === "approval_request") {
+                const req = textOrObj;
+                msgEl.innerHTML = `
+                    <div class="approval-card">
+                        <div class="approval-title">⚠️ 승인 요청</div>
+                        <div class="approval-body">
+                            <p><strong>툴:</strong> ${req.tool_name}</p>
+                            <p><strong>이유:</strong> ${req.reason}</p>
+                            <pre>${JSON.stringify(req.arguments, null, 2)}</pre>
+                        </div>
+                        <div class="approval-actions" id="actions-${req.request_id}">
+                            <button class="btn-allow" onclick="sendApproval('${req.request_id}', true)">승인</button>
+                            <button class="btn-deny" onclick="sendApproval('${req.request_id}', false)">거부</button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                msgEl.textContent = textOrObj;
+            }
+            
+            messagesDiv.appendChild(msgEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === "agent_message") {
+                appendMessage("agent", data.content);
+            } else if (data.type === "tool_start") {
+                appendMessage("system", data.content);
+            } else if (data.type === "tool_end") {
+                appendMessage("system", data.content);
+            } else if (data.type === "approval_request") {
+                appendMessage("agent", data, "approval_request");
+            }
+        };
+        
+        function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text) return;
+            appendMessage("user", text);
+            ws.send(JSON.stringify({ type: "chat", message: text }));
+            inputEl.value = "";
+        }
+        
+        function sendApproval(requestId, approved) {
+            ws.send(JSON.stringify({
+                type: "approval_response",
+                request_id: requestId,
+                approved: approved
+            }));
+            const actionsDiv = document.getElementById(`actions-${requestId}`);
+            if (actionsDiv) {
+                actionsDiv.innerHTML = approved ? "<span class='status-approved'>✅ 승인됨</span>" : "<span class='status-denied'>❌ 거부됨</span>";
+            }
+        }
+        
+        sendBtn.onclick = sendMessage;
+        inputEl.onkeypress = (e) => { if (e.key === "Enter") sendMessage(); };
+        
+        // Navigation logic
+        document.getElementById("nav-chat").onclick = () => switchView("chat");
+        document.getElementById("nav-trace").onclick = () => switchView("trace");
+        document.getElementById("nav-settings").onclick = () => switchView("settings");
+        
+        function switchView(viewName) {
+            ["chat", "trace", "settings"].forEach(v => {
+                document.getElementById(`nav-${v}`).classList.toggle("active", v === viewName);
+                document.getElementById(`${v}-view`).classList.toggle("hidden", v !== viewName);
+            });
+        }
+    </script>
+</body>
+</html>

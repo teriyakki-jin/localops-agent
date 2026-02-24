@@ -60,11 +60,19 @@ class PolicyMCPServer(MCPServerStdio):
         approved = True
 
         if requires_approval(tool_name):
-            approved = request_approval(
-                tool_name,
-                arguments,
-                reason=f"에이전트가 '{tool_name}' 실행을 요청합니다.",
-            )
+            if os.environ.get("LOCALOPS_WEB_MODE") == "1":
+                from web.approval import approval_manager
+                approved = await approval_manager.request_approval_async(
+                    tool_name,
+                    arguments,
+                    reason=f"에이전트가 '{tool_name}' 실행을 요청합니다.",
+                )
+            else:
+                approved = request_approval(
+                    tool_name,
+                    arguments,
+                    reason=f"에이전트가 '{tool_name}' 실행을 요청합니다.",
+                )
 
         if not approved:
             await log_tool_call(ToolCallTrace(
@@ -159,7 +167,7 @@ SYSTEM_PROMPT = """
 """.strip()
 
 
-async def run(user_input: str):
+async def run(user_input: str, hooks=None):
     import contextlib
     await init_db()
 
@@ -189,7 +197,7 @@ async def run(user_input: str):
         import openai as _openai
         for attempt in range(3):
             try:
-                result = await Runner.run(agent, user_input)
+                result = await Runner.run(agent, user_input, hooks=hooks)
                 break
             except _openai.RateLimitError as e:
                 if attempt == 2:
