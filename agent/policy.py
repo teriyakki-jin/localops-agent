@@ -42,6 +42,16 @@ TOOL_PERMISSIONS: dict[str, list[Permission]] = {
     "append_note": [Permission.W],
     # runner
     "run_command": [Permission.X],
+    # notion
+    "notion_search": [Permission.R],
+    "retrieve-a-page": [Permission.R],
+    "retrieve-a-data-source": [Permission.R],
+    "query-a-data-source": [Permission.R],
+    "create-a-page": [Permission.W],
+    "update-a-page": [Permission.W],
+    "append-block-children": [Permission.W],
+    "create-a-data-source": [Permission.W],
+    "update-a-data-source": [Permission.W],
 }
 
 # 이번 세션에서 사전 승인된 (tool, 인자 패턴) 목록

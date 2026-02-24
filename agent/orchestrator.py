@@ -29,6 +29,11 @@ from mcp.types import CallToolResult, TextContent as MCPTextContent
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
+import re as _re
+def _expand_env(value: str) -> str:
+    """${VAR} 형식의 환경변수 치환 (Windows 호환)."""
+    return _re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), value)
+
 from agent.policy import requires_approval, request_approval
 from agent.traces import init_db, log_tool_call, ToolCallTrace
 
@@ -124,7 +129,7 @@ async def build_mcp_servers() -> list[PolicyMCPServer]:
         params = MCPServerStdioParams(
             command=cfg["command"][0],
             args=cfg["command"][1:] + cfg.get("args", []),
-            env={k: str(v) for k, v in cfg.get("env", {}).items()} or None,
+            env={k: _expand_env(str(v)) for k, v in cfg.get("env", {}).items()} or None,
             cwd=project_root,
         )
         server = PolicyMCPServer(

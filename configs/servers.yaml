@@ -36,3 +36,11 @@ servers:
     args: []
     env:
       FASTMCP_SHOW_SERVER_BANNER: "false"
+
+  - id: mcp-notion
+    name: "Notion"
+    transport: stdio
+    command: ["npx", "-y", "@notionhq/notion-mcp-server"]
+    args: []
+    env:
+      NOTION_TOKEN: "${NOTION_TOKEN}"
