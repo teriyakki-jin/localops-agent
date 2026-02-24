@@ -8,27 +8,26 @@ Agent Orchestrator
 """
 import asyncio
 import os
+import sys
+import time
 import uuid
 import yaml
+
+# Windows 콘솔 UTF-8 강제
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 from dotenv import load_dotenv
 from rich.console import Console
-from openai import AsyncOpenAI
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from agents import Agent, Runner, set_default_openai_client, set_default_openai_api
+from agents import Agent, Runner
 from agents.mcp import MCPServerStdio, MCPServerStdioParams
-from agents import set_tracing_disabled
+from mcp.types import CallToolResult, TextContent as MCPTextContent
 
-# Gemini OpenAI 호환 엔드포인트로 교체
-_gemini_client = AsyncOpenAI(
-    api_key=os.environ.get("GEMINI_API_KEY", ""),
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-)
-set_default_openai_client(_gemini_client)
-set_default_openai_api("chat_completions")  # Gemini는 responses API 미지원
-set_tracing_disabled(True)  # Gemini 키로 OpenAI 트레이싱 서버 401 방지
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
 from agent.policy import requires_approval, request_approval
 from agent.traces import init_db, log_tool_call, ToolCallTrace
@@ -39,12 +38,85 @@ CONFIG_PATH = Path(__file__).parent.parent / "configs" / "servers.yaml"
 SESSION_ID = str(uuid.uuid4())[:8]
 
 
+class PolicyMCPServer(MCPServerStdio):
+    """Policy Engine + Trace Logger가 통합된 MCPServerStdio 래퍼.
+
+    call_tool()을 오버라이드해서:
+    - W/X/N 권한 툴 → 실행 전 사용자 승인 요청
+    - 모든 툴 호출 → traces.db에 기록
+    """
+
+    def __init__(self, session_id: str, name: str, params: MCPServerStdioParams, **kwargs):
+        super().__init__(name=name, params=params, **kwargs)
+        self._session_id = session_id
+
+    async def call_tool(self, tool_name: str, arguments: dict | None) -> CallToolResult:
+        arguments = arguments or {}
+        approved = True
+
+        if requires_approval(tool_name):
+            approved = request_approval(
+                tool_name,
+                arguments,
+                reason=f"에이전트가 '{tool_name}' 실행을 요청합니다.",
+            )
+
+        if not approved:
+            await log_tool_call(ToolCallTrace(
+                session_id=self._session_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                result="[거부됨]",
+                approved=False,
+                duration_ms=0.0,
+                timestamp=time.time(),
+                error="사용자 거부",
+            ))
+            return CallToolResult(
+                content=[MCPTextContent(
+                    type="text",
+                    text=f"[Policy 거부] 사용자가 '{tool_name}' 실행을 거부했습니다. 다른 방법을 시도하거나 작업을 중단하세요.",
+                )],
+                isError=True,
+            )
+
+        t0 = time.time()
+        error_msg = None
+        result_obj = None
+        try:
+            result_obj = await super().call_tool(tool_name, arguments)
+            return result_obj
+        except Exception as e:
+            error_msg = str(e)
+            raise
+        finally:
+            duration_ms = (time.time() - t0) * 1000
+            result_str = ""
+            if result_obj is not None:
+                try:
+                    result_str = "\n".join(
+                        c.text for c in result_obj.content if hasattr(c, "text")
+                    )
+                except Exception:
+                    result_str = str(result_obj)
+            await log_tool_call(ToolCallTrace(
+                session_id=self._session_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result_str,
+                approved=approved,
+                duration_ms=duration_ms,
+                timestamp=time.time(),
+                error=error_msg,
+            ))
+
+
 def load_server_configs() -> list[dict]:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return yaml.safe_load(f)["servers"]
 
 
-async def build_mcp_servers() -> list[MCPServerStdio]:
+async def build_mcp_servers() -> list[PolicyMCPServer]:
     """configs/servers.yaml의 allowlist 기반으로 MCP 서버 인스턴스 생성."""
     project_root = str(Path(__file__).parent.parent)
     servers = []
@@ -55,10 +127,12 @@ async def build_mcp_servers() -> list[MCPServerStdio]:
             env={k: str(v) for k, v in cfg.get("env", {}).items()} or None,
             cwd=project_root,
         )
-        server = MCPServerStdio(
+        server = PolicyMCPServer(
+            session_id=SESSION_ID,
             name=cfg["id"],
             params=params,
             cache_tools_list=True,
+            client_session_timeout_seconds=30,
         )
         servers.append(server)
     return servers
@@ -100,12 +174,24 @@ async def run(user_input: str):
         agent = Agent(
             name="LocalOpsAgent",
             instructions=SYSTEM_PROMPT,
-            model="gemini-2.5-flash",
+            model=MODEL,
             mcp_servers=connected_servers,
         )
 
         console.print("[dim]에이전트 실행 중...[/dim]\n")
-        result = await Runner.run(agent, user_input)
+
+        # 429 rate limit 자동 재시도 (최대 3회, 지수 백오프)
+        import openai as _openai
+        for attempt in range(3):
+            try:
+                result = await Runner.run(agent, user_input)
+                break
+            except _openai.RateLimitError as e:
+                if attempt == 2:
+                    raise
+                wait = 20 * (attempt + 1)
+                console.print(f"[yellow]Rate limit - {wait}초 후 재시도 ({attempt+1}/3)...[/yellow]")
+                await asyncio.sleep(wait)
 
     console.print("\n[bold green]결과:[/bold green]")
     console.print(result.final_output)

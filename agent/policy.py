@@ -95,7 +95,11 @@ def request_approval(
     console.print("[1] 이번 한 번만 허용")
     console.print("[2] 이 툴은 세션 동안 허용")
     console.print("[3] 거부")
-    choice = console.input("\n선택 (1/2/3): ").strip()
+    try:
+        choice = console.input("\n선택 (1/2/3): ").strip()
+    except EOFError:
+        console.print("[red]stdin 없음 - 자동 거부됨.[/red]")
+        return False
 
     if choice == "1":
         return True
